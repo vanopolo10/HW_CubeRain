@@ -8,8 +8,7 @@ public class Spawner : MonoBehaviour
     [SerializeField] private int _poolSize = 10;
     [SerializeField] private float _spawnHeight = 10;
     [SerializeField] private float _spawnRate = 0.5f;
-    [SerializeField] private bool _autoExpand = false;
-    [SerializeField] private float _voidLevel = -20f;
+    [SerializeField] private bool _autoExpand = false; 
 
     private Transform _platform;
     private ObjectPool<Cube> _objectPool;
@@ -19,85 +18,75 @@ public class Spawner : MonoBehaviour
         _platform = gameObject.GetComponent<Transform>();
 
         _objectPool = new ObjectPool<Cube>(
-            CreatePooledItem,
-            OnTakeFromPool,
-            OnReturnedToPool,
+            OnCreatePooledItem,
+            OnGetFromPool,
+            OnReleaseToPool,
             OnDestroyPoolObject,
             _autoExpand,
-            _poolSize);
+            _poolSize
+        );
     }
 
     private void Start()
     {
-        StartCoroutine(SpawnCube(_spawnRate));
-        StartCoroutine(CheckObjectsBelowMinHeight());
-    }
-    
-    IEnumerator CheckObjectsBelowMinHeight(float updateRate = 0.1f)
-    {
-        while (true)
-        {
-            var cubes = FindObjectsByType<Cube>(FindObjectsSortMode.None);
-            foreach (Cube cube in cubes)
-            {
-                if (cube.gameObject.activeInHierarchy && cube.transform.position.y < _voidLevel)
-                {
-                    _objectPool.Release(cube);
-                }
-            }
-
-            yield return new WaitForSeconds(updateRate);
-        }
+        StartCoroutine(SpawnCubes(_spawnRate));
     }
 
-    private IEnumerator SpawnCube(float time)
+    private IEnumerator SpawnCubes(float time)
     {
         int scaleMod = 2;
         float margin = 1;
+        
+        WaitForSeconds wait = new WaitForSeconds(time);
 
         while (true)
         {
-            Cube cube = _objectPool.Get();
+            if (_objectPool.CountActive < _poolSize || _autoExpand)
+            {
+                Cube cube = _objectPool.Get();
+                
+                Vector3 scale = _platform.localScale;
+                
+                Vector3 spawnPosition = _platform.position + new Vector3(
+                    Random.Range(-scale.x / scaleMod + margin, scale.x / scaleMod - margin),
+                    _spawnHeight,
+                    Random.Range(-scale.z / scaleMod + margin, scale.z / scaleMod - margin)
+                );
 
-            Vector3 spawnPosition = _platform.position + new Vector3(
-                Random.Range(-_platform.localScale.x / scaleMod + margin, _platform.localScale.x / scaleMod - margin),
-                _spawnHeight,
-                Random.Range(-_platform.localScale.z / scaleMod + margin, _platform.localScale.z / scaleMod - margin)
-            );
+                cube.ResetVelocity();
+                cube.transform.position = spawnPosition;
+            }
 
-            cube.ResetVelocity();
-            cube.transform.position = spawnPosition;
-
-            StartCoroutine(ReturnCubeToPoolAfterTime(cube, Random.Range(cube.MinDeathTime, cube.MaxDeathTime + 1)));
-
-            yield return new WaitForSeconds(time);
+            yield return wait;
         }
     }
 
-    private IEnumerator ReturnCubeToPoolAfterTime(Cube cube, float time)
+    private Cube OnCreatePooledItem()
     {
-        yield return new WaitForSeconds(time);
-        _objectPool.Release(cube); 
+        Cube cube = Instantiate(_cubePrefab);
+        cube.Died += OnCubeDied;
+
+        return cube;
     }
 
-
-    private Cube CreatePooledItem()
+    private void OnCubeDied(Cube cube)
     {
-        return Instantiate(_cubePrefab);
+        _objectPool.Release(cube);
     }
-
-    private void OnTakeFromPool(Cube cube)
+    
+    private void OnGetFromPool(Cube cube)
     {
         cube.gameObject.SetActive(true);
     }
 
-    private void OnReturnedToPool(Cube cube)
-    {
+    private void OnReleaseToPool(Cube cube)
+    { 
         cube.gameObject.SetActive(false);
     }
 
     private void OnDestroyPoolObject(Cube cube)
     {
+        cube.Died -= OnCubeDied;
         Destroy(cube.gameObject);
     }
 }
